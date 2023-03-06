@@ -4,19 +4,23 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.itheima.reggie.common.R;
+import com.itheima.reggie.dto.DishDto;
 import com.itheima.reggie.dto.SetmealDto;
 import com.itheima.reggie.entity.Category;
 import com.itheima.reggie.entity.Setmeal;
 import com.itheima.reggie.service.CategoryService;
 import com.itheima.reggie.service.SetmealService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-
+@Slf4j
 @RestController
 @RequestMapping("/setmeal")
 public class SetmealController {
@@ -26,6 +30,9 @@ public class SetmealController {
 
     @Autowired
     private CategoryService categoryService;
+
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     @PostMapping
     public R<String> save(@RequestBody SetmealDto setmealDto) {
@@ -90,10 +97,22 @@ public class SetmealController {
 
     @GetMapping("/list")
     public R<List<Setmeal>> list(Long categoryId, Integer status) {
+        // 先从Redis中获取缓存数据
+        String key = "seatmeal_" + categoryId + "_" + status;
+        List<Setmeal> setmealList = (List<Setmeal>) redisTemplate.opsForValue().get(key);
+        // 如果找到，直接返回
+        if (setmealList != null) {
+            log.info("Redis缓存命中！");
+            return R.success(setmealList);
+        }
+        // 如果没找到，则查询数据库
+        log.info("Redis缓存未命中！");
         LambdaQueryWrapper<Setmeal> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(categoryId != null, Setmeal::getCategoryId, categoryId);
         queryWrapper.eq(status != null, Setmeal::getStatus, status);
-        List<Setmeal> setmealList = setmealService.list(queryWrapper);
+        setmealList = setmealService.list(queryWrapper);
+        // 将数据放入Redis缓存
+        redisTemplate.opsForValue().set(key, setmealList, 60, TimeUnit.MINUTES);
         return R.success(setmealList);
     }
 }
