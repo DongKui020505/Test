@@ -12,11 +12,11 @@ import com.itheima.reggie.service.SetmealService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -30,10 +30,8 @@ public class SetmealController {
     @Autowired
     private CategoryService categoryService;
 
-    @Autowired
-    private RedisTemplate redisTemplate;
-
     @PostMapping
+    @CacheEvict(value = "seatmealCache", allEntries = true)
     public R<String> save(@RequestBody SetmealDto setmealDto) {
         setmealService.saveWithDish(setmealDto);
         return R.success("添加套餐成功！");
@@ -71,12 +69,14 @@ public class SetmealController {
     }
 
     @PutMapping
+    @CacheEvict(value = "seatmealCache", allEntries = true)
     public R<String> update(@RequestBody SetmealDto setmealDto) {
         setmealService.updateWithDish(setmealDto);
         return R.success("修改成功！");
     }
 
     @DeleteMapping
+    @CacheEvict(value = "seatmealCache", allEntries = true)
     public R<String> delete(@RequestParam List<Long> ids) {
         setmealService.removeWithDish(ids);
         return R.success("删除成功！");
@@ -95,23 +95,12 @@ public class SetmealController {
     }
 
     @GetMapping("/list")
+    @Cacheable(value = "setmealCache", key = "#categoryId + '_' + #status")
     public R<List<Setmeal>> list(Long categoryId, Integer status) {
-        // 先从Redis中获取缓存数据
-        String key = "seatmeal_" + categoryId + "_" + status;
-        List<Setmeal> setmealList = (List<Setmeal>) redisTemplate.opsForValue().get(key);
-        // 如果找到，直接返回
-        if (setmealList != null) {
-            log.info("Redis缓存命中！");
-            return R.success(setmealList);
-        }
-        // 如果没找到，则查询数据库
-        log.info("Redis缓存未命中！");
         LambdaQueryWrapper<Setmeal> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(categoryId != null, Setmeal::getCategoryId, categoryId);
         queryWrapper.eq(status != null, Setmeal::getStatus, status);
-        setmealList = setmealService.list(queryWrapper);
-        // 将数据放入Redis缓存
-        redisTemplate.opsForValue().set(key, setmealList, 60, TimeUnit.MINUTES);
+        List<Setmeal> setmealList = setmealService.list(queryWrapper);
         return R.success(setmealList);
     }
 }
